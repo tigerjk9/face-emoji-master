@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>표정 대장 챌린지 — Face Emoji Master</title>
+
+<meta property="og:title" content="표정 대장 챌린지" />
+<meta property="og:description" content="웹캠 앞에서 이모지 표정을 따라하는 5라운드 챌린지!" />
+<meta property="og:type" content="website" />
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+<style>
+  * { -webkit-font-smoothing: antialiased; }
+  html, body { font-family: 'Pretendard', sans-serif; background: #0a0613; color: #f5f1e8; min-height: 100vh; overflow-x: hidden; }
+  .aurora { position: fixed; inset: 0; z-index: -1; overflow: hidden;
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 0%, rgba(255,95,143,0.18), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 80% 0%, rgba(255,216,107,0.15), transparent 60%),
+      radial-gradient(ellipse 80% 80% at 50% 100%, rgba(96,165,250,0.15), transparent 60%),
+      #0a0613;
+  }
+  .aurora::before, .aurora::after { content:""; position:absolute; border-radius:50%; filter:blur(80px); opacity:0.55; animation:float 18s ease-in-out infinite; }
+  .aurora::before { width:60vw; height:60vw; top:-20vw; left:-10vw; background: radial-gradient(circle, #ff5f8f, transparent 70%); }
+  .aurora::after { width:55vw; height:55vw; bottom:-20vw; right:-10vw; background: radial-gradient(circle, #60a5fa, transparent 70%); animation-delay:-9s; }
+  @keyframes float { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,-40px) scale(1.1); } }
+
+  .glass { background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06); }
+
+  .gradient-text { background: linear-gradient(120deg, #ffd86b 0%, #ff5f8f 50%, #60a5fa 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    background-size: 200% 200%; animation: gshift 8s ease infinite; }
+  @keyframes gshift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+
+  .cta { position: relative; overflow: hidden; transition: transform .3s ease, box-shadow .3s ease; }
+  .cta::after { content:""; position:absolute; top:0; left:-150%; width:60%; height:100%;
+    background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.35) 50%, transparent 100%);
+    transform: skewX(-20deg); transition: left .7s ease; }
+  .cta:hover { transform: translateY(-2px); box-shadow: 0 12px 30px -8px rgba(255,180,84,0.5); }
+  .cta:hover::after { left: 150%; }
+
+  .pill { display:inline-flex; align-items:center; gap:6px; font-size:.72rem; font-weight:700; letter-spacing:.04em;
+    padding:6px 12px; border-radius:999px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#c5b8a3; }
+
+  /* Webcam mirror */
+  #webcam, #overlay { transform: scaleX(-1); -webkit-transform: scaleX(-1); }
+
+  /* Score bar */
+  .score-track { background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); }
+  .score-fill { background: linear-gradient(90deg, #ff5f8f, #ffd86b); transition: width .15s linear; }
+
+  .pulse { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+
+  .pop-in { animation: pop .5s cubic-bezier(.2,1.4,.4,1); }
+  @keyframes pop { 0% { transform: scale(0.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+  .countdown-ring {
+    transform: rotate(-90deg); transition: stroke-dashoffset 0.1s linear;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="aurora"></div>
+
+<div class="container mx-auto px-4 py-8 md:py-12 max-w-5xl relative z-10">
+
+  <!-- Header -->
+  <header class="text-center mb-8">
+    <span class="pill mb-3"><i class="text-rose-300">●</i> Face Mesh · Webcam</span>
+    <h1 class="text-4xl md:text-6xl font-black mt-3">
+      <span class="gradient-text">표정 대장 챌린지</span>
+    </h1>
+    <p class="mt-3 text-stone-300 text-base md:text-lg">화면이 보여주는 표정을 5라운드 동안 따라해 보세요!</p>
+  </header>
+
+  <!-- ═══ START SCREEN ═══ -->
+  <section id="start-screen" class="glass rounded-3xl p-8 md:p-12 text-center max-w-2xl mx-auto">
+    <div class="text-7xl md:text-8xl mb-6">😀😮😱😘😴</div>
+    <h2 class="text-2xl md:text-3xl font-bold mb-4">5라운드 표정 챌린지</h2>
+    <ol class="text-left text-stone-300 space-y-2 mb-8 max-w-md mx-auto text-sm md:text-base">
+      <li>1️⃣ 라운드마다 이모지 1개가 등장합니다</li>
+      <li>2️⃣ 5초 안에 같은 표정을 따라하세요</li>
+      <li>3️⃣ AI가 일치도를 0~100점으로 측정</li>
+      <li>4️⃣ 5라운드 합산 점수로 칭호 획득</li>
+      <li>5️⃣ 결과를 캡처해 친구에게 자랑하세요!</li>
+    </ol>
+    <button id="start-btn" class="cta bg-gradient-to-r from-rose-500 to-orange-500 text-white font-bold text-lg px-8 py-4 rounded-2xl shadow-lg">
+      🎬 게임 시작
+    </button>
+    <p class="mt-5 text-xs text-stone-500">💡 PC + 웹캠 권장 · 카메라 권한 허용 필요</p>
+  </section>
+
+  <!-- ═══ LOADING ═══ -->
+  <section id="loading-screen" class="hidden glass rounded-3xl p-12 text-center max-w-xl mx-auto">
+    <div class="inline-block w-16 h-16 border-4 border-stone-600 border-t-rose-400 rounded-full animate-spin"></div>
+    <p class="mt-6 text-lg text-stone-300">카메라와 AI 모델을 준비 중입니다…</p>
+    <p id="loading-detail" class="mt-2 text-sm text-stone-500">잠시만 기다려 주세요</p>
+  </section>
+
+  <!-- ═══ GAME SCREEN ═══ -->
+  <section id="game-screen" class="hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <!-- Webcam -->
+      <div class="lg:col-span-3 relative">
+        <div class="glass rounded-3xl overflow-hidden aspect-video relative">
+          <video id="webcam" class="w-full h-full object-cover" autoplay playsinline muted></video>
+          <canvas id="overlay" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+
+          <!-- Round indicator overlay -->
+          <div class="absolute top-3 left-3 pill">
+            <span>ROUND</span>
+            <span id="round-num" class="text-white font-black">1</span>
+            <span>/ 5</span>
+          </div>
+
+          <!-- Get Ready -->
+          <div id="get-ready" class="absolute inset-0 hidden bg-black/70 backdrop-blur-sm flex items-center justify-center text-center">
+            <div>
+              <p id="ready-text" class="text-7xl md:text-9xl font-black text-white pop-in">3</p>
+              <p class="mt-4 text-stone-300 text-sm md:text-base">준비하세요!</p>
+            </div>
+          </div>
+
+          <!-- Round result flash -->
+          <div id="round-flash" class="absolute inset-0 hidden bg-black/70 backdrop-blur-sm flex items-center justify-center text-center">
+            <div class="pop-in">
+              <p id="flash-emoji" class="text-7xl md:text-8xl mb-2"></p>
+              <p id="flash-score" class="text-5xl md:text-6xl font-black gradient-text"></p>
+              <p id="flash-comment" class="mt-3 text-stone-300 text-base md:text-lg"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Side panel -->
+      <div class="lg:col-span-2 flex flex-col gap-4">
+        <!-- Target emoji -->
+        <div class="glass rounded-3xl p-6 text-center">
+          <p class="text-stone-400 text-sm mb-1">이 표정을 따라하세요</p>
+          <div id="target-emoji" class="text-7xl md:text-8xl my-2 pop-in">😀</div>
+          <p id="target-name" class="text-xl md:text-2xl font-bold gradient-text">활짝 웃기</p>
+          <p id="target-hint" class="mt-2 text-sm text-stone-400">양쪽 입꼬리를 최대한 올려보세요!</p>
+        </div>
+
+        <!-- Countdown ring + score -->
+        <div class="glass rounded-3xl p-6">
+          <div class="flex items-center gap-4">
+            <div class="relative w-20 h-20 shrink-0">
+              <svg class="w-full h-full" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="8"/>
+                <circle id="countdown-ring" class="countdown-ring" cx="50" cy="50" r="44" fill="none"
+                        stroke="url(#cd-grad)" stroke-width="8" stroke-linecap="round"
+                        stroke-dasharray="276.46" stroke-dashoffset="0" transform-origin="50 50"/>
+                <defs>
+                  <linearGradient id="cd-grad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#ff5f8f"/>
+                    <stop offset="100%" stop-color="#ffd86b"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+              <span id="countdown-num" class="absolute inset-0 flex items-center justify-center text-2xl font-black">5</span>
+            </div>
+            <div class="flex-1">
+              <div class="flex justify-between mb-1.5">
+                <span class="text-sm text-stone-400">실시간 일치도</span>
+                <span id="live-score" class="text-sm font-bold text-rose-300">0</span>
+              </div>
+              <div class="score-track h-3 rounded-full overflow-hidden">
+                <div id="score-fill" class="score-fill h-full rounded-full" style="width:0%"></div>
+              </div>
+              <div class="flex justify-between mt-3">
+                <span class="text-xs text-stone-500">최고점</span>
+                <span id="best-score" class="text-xs font-bold text-amber-300">0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Round summary -->
+        <div class="glass rounded-3xl p-4">
+          <p class="text-xs text-stone-500 mb-2">진행 상황</p>
+          <div id="round-history" class="grid grid-cols-5 gap-2"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ RESULT SCREEN ═══ -->
+  <section id="result-screen" class="hidden glass rounded-3xl p-8 md:p-12 text-center max-w-2xl mx-auto">
+    <p class="pill mb-4">🎉 GAME CLEAR</p>
+    <h2 class="text-3xl md:text-4xl font-black mb-2">최종 점수</h2>
+    <p id="final-score" class="text-7xl md:text-8xl font-black gradient-text my-4 pop-in">0</p>
+    <p id="final-title" class="text-2xl md:text-3xl font-bold text-amber-300 mb-2">표정 신입생 🙂</p>
+    <p id="final-message" class="text-stone-300 mb-8">표정 더 살려봐요!</p>
+
+    <div id="round-result-grid" class="grid grid-cols-5 gap-2 mb-8"></div>
+
+    <div class="flex flex-wrap justify-center gap-3">
+      <button id="retry-btn" class="cta bg-gradient-to-r from-rose-500 to-orange-500 text-white font-bold px-7 py-3.5 rounded-2xl shadow-lg">
+        🔁 다시 도전
+      </button>
+      <a href="https://ai-hands-on-booth-v2.vercel.app/" class="cta bg-white/5 hover:bg-white/10 border border-white/10 text-stone-200 font-bold px-7 py-3.5 rounded-2xl">
+        🏠 부스 메인
+      </a>
+    </div>
+  </section>
+
+  <footer class="text-center text-stone-500 text-sm mt-16 pb-8">
+    <p>Made by <a href="https://litt.ly/dot_connector" target="_blank" rel="noopener" class="text-amber-300 hover:underline">김진관 (닷커넥터)</a></p>
+    <p class="mt-1 text-xs">Powered by MediaPipe Face Mesh · No data leaves your browser</p>
+  </footer>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// Face Emoji Master — game logic
+// ═══════════════════════════════════════════════
+
+// Landmark indices (MediaPipe Face Mesh, refineLandmarks=true)
+const L = {
+  lipL: 61, lipR: 291,
+  lipTop: 13, lipBot: 14,
+  eyeR_top: 159, eyeR_bot: 145, eyeR_in: 133, eyeR_out: 33,
+  eyeL_top: 386, eyeL_bot: 374, eyeL_in: 362, eyeL_out: 263,
+  browR_inner: 65, browR_outer: 70,
+  browL_inner: 295, browL_outer: 300,
+  noseTip: 1, chin: 152, foreheadTop: 10
+};
+
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// EAR (Eye Aspect Ratio) — typical open ≈ 0.30, closed < 0.18
+const ear = (lm, top, bot, inn, outn) => {
+  const v = dist(lm[top], lm[bot]);
+  const h = dist(lm[inn], lm[outn]);
+  return h > 0 ? v / h : 0;
+};
+
+const faceWidth = lm => dist(lm[234], lm[454]);
+const faceHeight = lm => dist(lm[10], lm[152]);
+
+const norm = (v, lo, hi) => Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+
+// ─── scorers (return 0..1) ───
+const smileScore = (lm) => {
+  const mouthW = dist(lm[L.lipL], lm[L.lipR]);
+  const fw = faceWidth(lm);
+  return norm(mouthW / fw, 0.42, 0.58);
+};
+
+const mouthOpenScore = (lm) => {
+  const open = dist(lm[L.lipTop], lm[L.lipBot]);
+  const fh = faceHeight(lm);
+  return norm(open / fh, 0.04, 0.18);
+};
+
+const surpriseScore = (lm) => {
+  const mouth = mouthOpenScore(lm);
+  const eyeR = ear(lm, L.eyeR_top, L.eyeR_bot, L.eyeR_in, L.eyeR_out);
+  const eyeL = ear(lm, L.eyeL_top, L.eyeL_bot, L.eyeL_in, L.eyeL_out);
+  const eyeOpen = norm((eyeR + eyeL) / 2, 0.28, 0.42);
+  // Need both elements
+  return Math.sqrt(mouth * eyeOpen);
+};
+
+// Right wink = user closes one eye (mirrored video; eyes named from face's POV)
+const winkScore = (lm) => {
+  const eyeR = ear(lm, L.eyeR_top, L.eyeR_bot, L.eyeR_in, L.eyeR_out);
+  const eyeL = ear(lm, L.eyeL_top, L.eyeL_bot, L.eyeL_in, L.eyeL_out);
+  const closedSide = Math.min(eyeR, eyeL);
+  const openSide = Math.max(eyeR, eyeL);
+  // closed < 0.18, open > 0.27, gap > 0.10
+  const closeMatch = 1 - norm(closedSide, 0.10, 0.22);
+  const openMatch = norm(openSide, 0.22, 0.32);
+  const gap = norm(openSide - closedSide, 0.06, 0.16);
+  return Math.cbrt(closeMatch * openMatch * gap);
+};
+
+const eyesClosedScore = (lm) => {
+  const eyeR = ear(lm, L.eyeR_top, L.eyeR_bot, L.eyeR_in, L.eyeR_out);
+  const eyeL = ear(lm, L.eyeL_top, L.eyeL_bot, L.eyeL_in, L.eyeL_out);
+  const avg = (eyeR + eyeL) / 2;
+  return 1 - norm(avg, 0.14, 0.26);
+};
+
+// ─── Game data ───
+const ALL_TARGETS = [
+  { emoji: "😀", name: "활짝 웃기",     hint: "양쪽 입꼬리를 최대한 올려보세요!", scorer: smileScore },
+  { emoji: "😮", name: "입 쩍 벌리기",   hint: "입을 크고 동그랗게 벌려보세요!",   scorer: mouthOpenScore },
+  { emoji: "😱", name: "깜짝 놀라기",   hint: "눈도 크게, 입도 크게!",             scorer: surpriseScore },
+  { emoji: "😉", name: "한쪽 윙크",     hint: "한쪽 눈만 살짝 감아보세요!",       scorer: winkScore },
+  { emoji: "😴", name: "눈 감고 자기",   hint: "두 눈을 살짝 감아보세요!",         scorer: eyesClosedScore }
+];
+
+// ─── State ───
+let state = {
+  phase: "splash",    // splash | loading | ready | playing | between | result
+  round: 0,
+  targets: [],
+  history: [],
+  bestThisRound: 0,
+  liveScore: 0,
+  roundEndsAt: 0,
+  faceMesh: null,
+  camera: null,
+  videoEl: null,
+  canvasEl: null,
+  ctx: null,
+  modelReady: false
+};
+
+// ─── DOM ───
+const $ = (id) => document.getElementById(id);
+const screens = {
+  splash: $("start-screen"),
+  loading: $("loading-screen"),
+  game: $("game-screen"),
+  result: $("result-screen")
+};
+
+const showScreen = (name) => {
+  Object.values(screens).forEach(el => el.classList.add("hidden"));
+  screens[name].classList.remove("hidden");
+};
+
+// ─── Init MediaPipe ───
+const initMediaPipe = async () => {
+  $("loading-detail").textContent = "AI 모델 다운로드 중…";
+  state.faceMesh = new FaceMesh({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+  });
+  state.faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  state.faceMesh.onResults(handleResults);
+};
+
+const initCamera = async () => {
+  $("loading-detail").textContent = "카메라 권한 요청 중…";
+  state.videoEl = $("webcam");
+  state.canvasEl = $("overlay");
+  state.ctx = state.canvasEl.getContext("2d");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+      audio: false
+    });
+    state.videoEl.srcObject = stream;
+    await new Promise((res) => state.videoEl.onloadedmetadata = res);
+    state.canvasEl.width = state.videoEl.videoWidth;
+    state.canvasEl.height = state.videoEl.videoHeight;
+    state.camera = new Camera(state.videoEl, {
+      onFrame: async () => {
+        if (state.faceMesh) await state.faceMesh.send({ image: state.videoEl });
+      },
+      width: 1280,
+      height: 720
+    });
+    state.camera.start();
+    state.modelReady = true;
+  } catch (err) {
+    alert("카메라 접근에 실패했습니다. 권한을 허용해주세요.\n" + err.message);
+    showScreen("splash");
+    throw err;
+  }
+};
+
+// ─── Drawing ───
+const drawFace = (lm) => {
+  const ctx = state.ctx;
+  const w = state.canvasEl.width;
+  const h = state.canvasEl.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "rgba(255, 95, 143, 0.7)";
+  // dot key landmarks (lips + eyes only)
+  [L.lipL, L.lipR, L.lipTop, L.lipBot,
+   L.eyeR_top, L.eyeR_bot, L.eyeR_in, L.eyeR_out,
+   L.eyeL_top, L.eyeL_bot, L.eyeL_in, L.eyeL_out].forEach(idx => {
+    const p = lm[idx];
+    ctx.beginPath();
+    ctx.arc(p.x * w, p.y * h, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+};
+
+const clearOverlay = () => {
+  if (!state.ctx) return;
+  state.ctx.clearRect(0, 0, state.canvasEl.width, state.canvasEl.height);
+};
+
+// ─── Frame handler ───
+const handleResults = (results) => {
+  if (state.phase !== "playing") {
+    clearOverlay();
+    return;
+  }
+  if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+    state.liveScore = 0;
+    updateScoreUI(0);
+    clearOverlay();
+    return;
+  }
+  const lm = results.multiFaceLandmarks[0];
+  drawFace(lm);
+  const target = state.targets[state.round - 1];
+  const raw = target.scorer(lm);
+  // Smooth
+  state.liveScore = state.liveScore * 0.5 + raw * 100 * 0.5;
+  if (state.liveScore > state.bestThisRound) state.bestThisRound = state.liveScore;
+  updateScoreUI(state.liveScore);
+};
+
+const updateScoreUI = (s) => {
+  const v = Math.round(s);
+  $("live-score").textContent = v;
+  $("score-fill").style.width = `${Math.min(100, v)}%`;
+  $("best-score").textContent = Math.round(state.bestThisRound);
+};
+
+// ─── Game flow ───
+const pickTargets = () => {
+  const arr = [...ALL_TARGETS];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, 5);
+};
+
+const renderHistory = () => {
+  const grid = $("round-history");
+  grid.innerHTML = "";
+  for (let i = 0; i < 5; i++) {
+    const cell = document.createElement("div");
+    const isCurrent = i + 1 === state.round && state.phase === "playing";
+    const done = state.history[i];
+    cell.className = "rounded-xl py-2 text-center text-xs font-bold transition " +
+      (done ? "bg-emerald-400/15 border border-emerald-400/30 text-emerald-200" :
+       isCurrent ? "bg-rose-400/15 border border-rose-400/40 text-rose-200 pulse" :
+       "bg-white/5 border border-white/10 text-stone-500");
+    cell.innerHTML = done
+      ? `<div class="text-base">${done.emoji}</div><div>${done.score}</div>`
+      : `<div class="text-base opacity-50">${ALL_TARGETS[(i)] ? state.targets[i]?.emoji || "·" : "·"}</div><div>R${i+1}</div>`;
+    grid.appendChild(cell);
+  }
+};
+
+const startGame = async () => {
+  showScreen("loading");
+  if (!state.modelReady) {
+    await initMediaPipe();
+    await initCamera();
+  }
+  state.targets = pickTargets();
+  state.history = [];
+  state.round = 0;
+  showScreen("game");
+  await getReady();
+  nextRound();
+};
+
+const getReady = () => new Promise((resolve) => {
+  state.phase = "ready";
+  const ready = $("get-ready");
+  ready.classList.remove("hidden");
+  ready.classList.add("flex");
+  let n = 3;
+  $("ready-text").textContent = n;
+  const iv = setInterval(() => {
+    n--;
+    if (n <= 0) {
+      clearInterval(iv);
+      $("ready-text").textContent = "GO!";
+      setTimeout(() => {
+        ready.classList.add("hidden");
+        ready.classList.remove("flex");
+        resolve();
+      }, 500);
+    } else {
+      $("ready-text").textContent = n;
+      $("ready-text").classList.remove("pop-in");
+      void $("ready-text").offsetWidth;
+      $("ready-text").classList.add("pop-in");
+    }
+  }, 1000);
+});
+
+const nextRound = () => {
+  state.round++;
+  if (state.round > 5) { showResult(); return; }
+  const target = state.targets[state.round - 1];
+  $("round-num").textContent = state.round;
+  $("target-emoji").textContent = target.emoji;
+  $("target-emoji").classList.remove("pop-in");
+  void $("target-emoji").offsetWidth;
+  $("target-emoji").classList.add("pop-in");
+  $("target-name").textContent = target.name;
+  $("target-hint").textContent = target.hint;
+  state.bestThisRound = 0;
+  state.liveScore = 0;
+  updateScoreUI(0);
+  renderHistory();
+  startCountdown(5);
+};
+
+const startCountdown = (seconds) => {
+  state.phase = "playing";
+  state.roundEndsAt = performance.now() + seconds * 1000;
+  const ring = $("countdown-ring");
+  const total = 276.46;
+  const tick = () => {
+    const remain = (state.roundEndsAt - performance.now()) / 1000;
+    if (remain <= 0) {
+      ring.style.strokeDashoffset = total;
+      $("countdown-num").textContent = 0;
+      finishRound();
+      return;
+    }
+    const pct = remain / seconds;
+    ring.style.strokeDashoffset = total * (1 - pct);
+    $("countdown-num").textContent = Math.ceil(remain);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
+
+const commentForScore = (s) => {
+  if (s >= 85) return "🤩 완벽해요!";
+  if (s >= 65) return "😎 멋진 표정!";
+  if (s >= 40) return "🙂 그 정도면 OK!";
+  if (s >= 20) return "😅 조금만 더!";
+  return "😶 다음 라운드 화이팅!";
+};
+
+const finishRound = async () => {
+  state.phase = "between";
+  const target = state.targets[state.round - 1];
+  const finalScore = Math.round(state.bestThisRound);
+  state.history.push({ emoji: target.emoji, name: target.name, score: finalScore });
+  // Flash
+  $("flash-emoji").textContent = target.emoji;
+  $("flash-score").textContent = finalScore;
+  $("flash-comment").textContent = commentForScore(finalScore);
+  const flash = $("round-flash");
+  flash.classList.remove("hidden");
+  flash.classList.add("flex");
+  await new Promise(r => setTimeout(r, 1700));
+  flash.classList.add("hidden");
+  flash.classList.remove("flex");
+  renderHistory();
+  if (state.round >= 5) showResult();
+  else nextRound();
+};
+
+const titleForTotal = (t) => {
+  if (t >= 400) return { title: "표정의 신 🤩", msg: "당신의 얼굴이 곧 예술입니다!" };
+  if (t >= 300) return { title: "표정 마스터 😎", msg: "표정 연기력 만렙!" };
+  if (t >= 200) return { title: "표정 챌린저 😊", msg: "꽤 잘 따라하셨어요!" };
+  if (t >= 100) return { title: "표정 새싹 🌱", msg: "조금만 더 과감하게!" };
+  return { title: "표정 신입생 🙂", msg: "다음 도전을 기대합니다!" };
+};
+
+const showResult = () => {
+  state.phase = "result";
+  const total = state.history.reduce((a, b) => a + b.score, 0);
+  $("final-score").textContent = total;
+  const t = titleForTotal(total);
+  $("final-title").textContent = t.title;
+  $("final-message").textContent = t.msg;
+  const grid = $("round-result-grid");
+  grid.innerHTML = state.history.map(h => `
+    <div class="rounded-xl py-3 px-1 text-center bg-white/5 border border-white/10">
+      <div class="text-2xl">${h.emoji}</div>
+      <div class="text-sm font-bold text-rose-300 mt-1">${h.score}</div>
+    </div>
+  `).join("");
+  showScreen("result");
+};
+
+// ─── Wire up ───
+$("start-btn").addEventListener("click", () => startGame().catch(console.error));
+$("retry-btn").addEventListener("click", () => {
+  state.targets = pickTargets();
+  state.history = [];
+  state.round = 0;
+  showScreen("game");
+  getReady().then(nextRound);
+});
+</script>
+</body>
+</html>
